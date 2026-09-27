@@ -6,7 +6,16 @@ machine, collapses the repeated errors into one row per real problem, attaches k
 troubleshooting steps, decodes error codes and exports a ticket-ready report — all from one
 window, with no agent, no server and no telemetry.
 
-![Demo data view](docs/demo-data.png)
+![Endpoint Log Monitor - Health tab with demo data loaded](docs/readme-screenshot.png)
+
+*Health tab with **Demo data** loaded: 28 grouped issues from 15 sample SCCM/Intune logs, 27 of
+them matched to a known fix, with the selected issue's steps and raw log lines on the right.*
+
+## Screenshots
+
+| Health tab (demo data) | Health tab (real scan) |
+| --- | --- |
+| ![Health tab with demo data](docs/readme-screenshot.png) | ![Health tab with a real scan](docs/health-tab.png) |
 
 ## Why
 
