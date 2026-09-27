@@ -1,0 +1,15 @@
+# OS / editor noise
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+
+# sample logs generated on demand by the "Demo data" button
+DemoLogs/
+
+# throwaway copies produced while testing / screenshotting
+_*.ps1
+
+# reports exported from the toolbar (default file name pattern)
+EndpointLogMonitor-*.html
+EndpointLogMonitor-*.csv

@@ -1,0 +1,670 @@
+================================================================================
+ ENDPOINT LOG MONITOR - FUNCTIONALITY GUIDE
+ Reads ConfigMgr / ccmsetup / Intune / MDM client logs, groups the errors that
+ need action, attaches known troubleshooting steps, decodes error codes and
+ exports reports. Windows GUI, PowerShell 5.1 + WinForms.
+================================================================================
+
+
+--------------------------------------------------------------------------------
+ 1. WHAT IT IS
+--------------------------------------------------------------------------------
+
+Endpoint Log Monitor is a single-folder PowerShell application. It walks the
+client log files on this PC (or on another PC over your admin share), pulls out
+the warnings and errors, collapses repeats into one row per real problem, tells
+you what it means and how to fix it, and lets you trigger the ConfigMgr client
+cycles that usually clear it - all from one window.
+
+Design rules it follows:
+
+  * Nothing leaves your network. It reads log files and one Windows event log.
+    No telemetry, no uploads, no agent installed on the target.
+  * Your rules are yours. Rules.json is only ever written when you explicitly
+    hide a pattern; fixes you add are never overwritten.
+  * Nothing destructive by default. Client actions are the same actions a tech
+    would run by hand; the only destructive one (clear ccmcache) asks first.
+
+
+--------------------------------------------------------------------------------
+ 2. HOW TO RUN IT
+--------------------------------------------------------------------------------
+
+  powershell -ExecutionPolicy Bypass -File .\EndpointLogMonitor.ps1
+
+Parameters (both optional):
+
+  -ComputerName <name>   Pre-fill the DEVICE box and auto-scan that machine
+                         as soon as the window opens.
+  -RulesPath <path>      Use a different rules file than .\Rules.json.
+
+Examples:
+
+  .\EndpointLogMonitor.ps1
+  .\EndpointLogMonitor.ps1 -ComputerName PC-042
+  .\EndpointLogMonitor.ps1 -RulesPath "\\share\team-rules.json"
+
+Requirements: Windows PowerShell 5.1 (built in on Windows 10/11),
+System.Windows.Forms (part of Windows). Run from any location - the script
+finds its sibling files relative to itself. ExecutionPolicy Bypass is the
+simplest way to launch it; nothing else needs installing.
+
+If you do NOT pass -ComputerName the window opens idle ("Ready. Click Scan
+logs...") so you can see the layout first. With -ComputerName it scans on open.
+
+
+--------------------------------------------------------------------------------
+ 3. FILES IN THE FOLDER
+--------------------------------------------------------------------------------
+
+  EndpointLogMonitor.ps1   The entry point - this is the file you run. Also
+                           holds all the window wiring (event handlers).
+  Rules.json               Shared knowledge: fixes, noise patterns, hidden
+                           patterns. Edit it by hand or via the right-click
+                           menu. Auto-created if missing.
+  Rules.lib.ps1            Rules file handling + error-code decoding maths.
+  LogReader.lib.ps1        Log parsing (CMTrace / legacy SMS / plain text),
+                           scanning, grouping, row building.
+  Export.lib.ps1           HTML and CSV report writers.
+  Actions.lib.ps1          Client schedule / service / cache / Intune actions.
+  Demo.lib.ps1             Sample log generator behind the Demo data button.
+  Ui.Build.ps1             Builds the whole window (layout, controls, theme).
+  DemoLogs\                Sample logs, written on demand by Demo data.
+                           Safe to delete; regenerated on every click.
+
+The *.lib.ps1 files are dot-sourced by the entry point - never run them
+directly.
+
+
+--------------------------------------------------------------------------------
+ 4. THE WINDOW - LAYOUT TOUR
+--------------------------------------------------------------------------------
+
+The window sizes itself to your screen: never larger than the working area
+(the desktop minus the taskbar), never smaller than 1320 x 760. It opens
+centred and can be maximised; controls re-anchor as you resize.
+
++--------------------------------------------------------------------------+
+|  Endpoint Log Monitor                          DEVICE  [          ]      |
+|  Reads ConfigMgr, ccmsetup, Intune and MDM...  [    Scan logs    ]      |
++--------------------------------------------------------------------------+
+| Health | Error codes | Client actions | About                            |
+| [x] Include informational lines  [x] Hide known noise                    |
+| [Export HTML] [Export CSV] [Re-scan] [Open rules file]    Filter: [    ] |
+|                                                                          |
+| +---------------+ +---------------+ +---------------+ +----------------+ |
+| |      1        | |      0        | |      1        | | 13:12  LOCAL   | |
+| | ITEMS NEED... | | WITH A KNOWN  | |  LOGS READ    | | LAST SCAN /    | |
+| +---------------+ +---------------+ +---------------+ | TARGET DEVICE  | |
+|                                                       +----------------+ |
+| Severity | Issue .............. | Fix | Log        | Count |   WHAT TO DO |
+| Error    | <problem title>     | Yes | AppEnforce | 12    | <issue name> |
+| Warning  | ...                 |     |            |       | steps 1..n   |
+|                                                                          |
+|                                       [Copy steps] [Copy as CSV row]     |
+|                                       WHY IT MATTERS                     |
++--------------------------------------------------------------------------+
+| Ready. Click Scan logs to read the client logs on this device.           |
++--------------------------------------------------------------------------+
+
+4.1 HEADER
+  DEVICE box      blank = this machine; otherwise a computer name that
+                  allows administrative share access (see section 11).
+  Scan logs       runs the scan with the current checkbox states.
+  Tooltip on the box: "Leave blank to scan this machine, or type a computer
+                  name".
+
+4.2 HEALTH TAB - toolbar
+  Include informational lines   off by default. When off, only warning and
+                                error entries are captured. Turn it on to see
+                                everything (much noisier).
+  Hide known noise              on by default. Applies the 22 noise patterns
+                                in Rules.json (routine WSUS / Group Policy /
+                                policy-wait chatter). Unchecking it re-scans
+                                with the noise list disabled so you can see
+                                what is being suppressed.
+  Export HTML report            SaveFileDialog -> opens the report.
+  Export CSV                    SaveFileDialog.
+  Re-scan                       runs the scan again (same as Scan logs).
+  Open rules file               opens Rules.json in your default editor
+                                (creates it first if it is missing).
+  Demo data                     writes 15 sample SCCM / Intune logs into
+                                .\DemoLogs and scans those instead of this
+                                machine - see section 13.
+  Filter:                        live text filter over the grid; matches
+                                Issue, Log, Severity and Fix fields
+                                (case-insensitive substring).
+
+  Both checkboxes re-run the scan automatically after a scan has happened, so
+  the grid always reflects the current switches.
+
+4.3 HEALTH TAB - five stat cards
+  ITEMS NEED ATTENTION   grouped issues that are not informational (if every
+                         row is informational, it shows the total row count).
+  WITH A KNOWN FIX       rows whose matched fix has steps.
+  LOGS READ              number of log files + the MDM event log source.
+  LAST SCAN              time of the last successful scan (HH:mm).
+  TARGET DEVICE          the PC the result describes (blank DEVICE = your
+                         own computer name). Long names shrink the font so
+                         they still fit.
+
+4.4 HEALTH TAB - issues grid (left pane)
+  Columns: Severity | Issue | Fix | Log | Count
+    Severity   Error / Warning / Info
+    Issue      the fix title if we know this problem, otherwise the raw
+               message truncated to 140 characters
+    Fix        "Yes" when a fix with troubleshooting steps is attached
+    Log        which log file the group came from
+    Count      how many times it occurred (repeats collapse into one row)
+  Sort order: Errors first, then Warnings, then Info; within a severity the
+  most frequent issue is on top, then alphabetical.
+
+  Right-click menu on a row:
+    Copy issue text            severity, issue, log, count - tab separated
+    Copy troubleshooting steps the numbered steps only
+    Hide this pattern for the
+      whole team               builds a regex from the message shape, appends
+                               it to Rules.json "hidden", re-scans. Safe: the
+                               pattern ignores GUIDs, timestamps, hex codes and
+                               long numbers, so it still matches next week.
+    Look up the error code     jumps to the Error codes tab with the row's
+                               first 0x code pre-filled.
+
+4.5 HEALTH TAB - detail pane (right pane)
+  WHAT TO DO                 the issue title (up to three lines).
+  Badge                      KNOWN FIX (green) or NO KNOWN FIX (grey).
+  Badge 2                    log name, how many times seen, first-last seen.
+  Numbered steps             what to check, in order, coloured by step
+                             number. If there is no fix: "No known fix for
+                             this one yet. Add one to Rules.json and it will
+                             appear here."
+  WHAT YOUR TECH SEES TODAY  the log name + occurrence count, then up to 4
+                             real sample lines from that group (dark console
+                             box) - exactly what you would see in CMTrace.
+  Copy steps                 puts the numbered steps on the clipboard.
+  Copy as CSV row            one CSV row for the selected issue -> paste into
+                             a ticket or spreadsheet.
+  WHY IT MATTERS            the short background blurb.
+
+  The pane scrolls; everything is laid out for the widest supported window
+  and nothing overflows at the minimum size.
+
+4.6 STATUS BAR
+  Progress while scanning ("Scanning - reading C:\Windows\CCM\Logs\..."), then
+  a summary such as:
+    1 issues from 1 log files (2 entries read, 0 hidden by your rules).
+  Errors appear here too ("Scan failed: ...") along with an error dialog.
+
+4.7 ERROR CODES TAB
+  Field + Look up (Enter also works), plus 7 one-click examples:
+    0x87D00324  -2016345060  0x80244022  1618  0x8018002b  3010  0x80070643
+  Result panel shows:
+    HEX / SIGNED DECIMAL / UNSIGNED DECIMAL / RAW WIN32 - MSI  four
+        representations of the same value, monospaced.
+    Confidence line        "Definition verified against Microsoft
+                            documentation." / "...from community / field
+                            reports..." / "...treat this meaning as
+                            unconfirmed." / "Decoded, but this code is not in
+                            Rules.json yet."
+    PLAIN ENGLISH          what the code means, plus notes (for example
+                            0x8007xxxx decoding notes).
+    WHAT TO DO             numbered steps for that code, if we have them.
+
+4.8 CLIENT ACTIONS TAB
+  Left list: 10 ConfigMgr client cycles, then a separator, then services and
+  maintenance. Right side: [Run selected action] [Run all client cycles] and
+  a colour-coded console log with timestamps (green = OK, red = FAIL,
+  blue = starting, amber = service work). Target comes from the DEVICE box
+  in the header - blank means this machine.
+
+4.9 ABOUT TAB
+  Why it matters, what it does, what it reads, how it fits, and the
+  Microsoft trademark notice.
+
+
+--------------------------------------------------------------------------------
+ 5. HOW A SCAN WORKS (THE PIPELINE)
+--------------------------------------------------------------------------------
+
+Clicking Scan logs runs this sequence (Invoke-LogScan -> New-IssueRows):
+
+  1. RESOLVE ROOTS
+     Local (blank DEVICE) or remote (\\PC\admin$ ...). Missing folders are
+     reported in the progress line, not as errors. The Demo data button
+     substitutes its own folder here (section 13).
+
+  2. ENUMERATE FILES
+     *.log and *.lo_ in each root folder (top level only, no recursion).
+
+  3. PARSE EACH FILE, streaming with FileShare.ReadWrite so a log that is
+     being written to right now still opens:
+       - CMTrace format   <![LOG[message]LOG]!><time=".." date=".."
+                          component=".." type="1|2|3" ...>
+                          Multi-line messages are joined with newlines.
+       - Legacy SMS       "message  $$<Component><MM-DD-YYYY hh:mm:ss.fff-60>
+                          <thread=...>"
+       - Anything else    treated as a plain-text line, severity guessed from
+                          the words in it.
+     Severity source: CMTrace type attribute (1 = info, 2 = warning,
+     3 = error) when present; otherwise the keyword heuristic (error, failed,
+     fatal, exception, denied, cannot, could not, unable -> error;
+     warning, retry, timeout, not found, skipping -> warning).
+
+  4. CAPTURE FILTER
+     Entry kept when: type >= 2 (warning/error), OR "Include informational
+     lines" is ticked. Same rule is applied to the event log entries, so the
+     switch behaves identically everywhere.
+
+  5. MDM EVENT LOG
+     Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Admin
+     (up to 1500 events), shown as MDM-Diagnostics.evtx. Levels map to
+     Critical/Error -> error, Warning -> warning, else info.
+
+  6. HIDDEN then NOISE
+     Hidden (yours) matches remove the line and are counted for the status
+     bar. Noise (built in) matches remove it silently.
+
+  7. EXTRACT ERROR CODES from the message (see section 7).
+
+  8. NORMALISE + GROUP (see section 6). Each group accumulates: count,
+     first-seen, last-seen, worst severity, the code list, and up to 4
+     sample lines.
+
+  9. MATCH A FIX
+     First by code (index of every code/aliasCode in Rules.json), then by a
+     regex `match` field on the raw message. Title + first hex code becomes
+     the Issue text; "Fix = Yes" when the matched fix has steps.
+
+ 10. BUILD ROWS + SORT
+     Severity rank, then count descending, then issue. Bind to the grid and
+     select the first row so the detail pane is never empty after a scan.
+
+Hard limits (protection against a runaway directory):
+  400,000 captured entries per scan, 20,000 distinct groups, 1500 MDM events.
+
+
+--------------------------------------------------------------------------------
+ 6. GROUPING - WHY 500 LINES BECOME ONE ROW
+--------------------------------------------------------------------------------
+
+A problem like "App installation failed with error 0x87D00324" repeats hundreds
+of times with different GUIDs, times and numbers. Grouping keys on:
+
+    <log file> | <normalised message> | <known codes in it>
+
+Normalisation (ConvertTo-NormalisedShape) rewrites the volatile parts:
+
+  {12AB...-...}  or (12AB...-...)  or bare GUID   ->  <G>   (brace style kept
+                                                       in the surrounding
+                                                       text so {GUID} and
+                                                       (GUID) end up equal)
+  14:05:09.123 or 1:2:3                            ->  <T>
+  0x87D00324 / 0x80070643                          ->  <H>
+  any 4+ digit run                                 ->  <N>
+  runs of whitespace                               -> single space
+
+Two lines from the same log with the same shape but different GUIDs/times
+therefore land in one group with Count = n. Codes are also part of the key:
+if one instance carries a known code and another does not, they stay separate,
+because the actionable problem is different.
+
+The same normaliser is used to build "hide this pattern" regexes, which is
+why hiding survives changing GUIDs and timestamps.
+
+
+--------------------------------------------------------------------------------
+ 7. ERROR CODE DECODING
+--------------------------------------------------------------------------------
+
+Codes are harvested from a message by three rules (Get-CodesFromMessage):
+  * hex literals  0x87D00324 (4-8 hex digits)
+  * large decimals -2016410844 / 2278556452 (6-10 digits, not glued to a word
+    or a dot so versions are skipped)
+  * "exit code 1618" / "return code" / "error code" / "result code" patterns
+    -> MSI:n, plus the wrapped form 0x80070000 + n
+
+Normalisation (ConvertTo-CanonicalHex) turns any of those into one canonical
+'0xXXXXXXXX' form, so 0x87D00324, -2016410844 and 2278556452 are the same key.
+
+Decoding rules used by the Error codes tab:
+
+  * hex input                       -> unsigned = value, signed = reinterpret
+                                       as int32, canonical = 0x%08X
+  * negative decimal                -> unsigned = value + 2^32
+  * positive decimal > 2^31-1       -> signed = value - 2^32, note added
+  * 0x80070000 .. 0x8007FFFF       -> HRESULT_FROM_WIN32:
+                                       Win32 = unsigned - 0x80070000
+                                       if that is <= 65535 it is also the raw
+                                       MSI/Win32 exit code
+  * value <= 65535                  -> treated as a raw MSI / Win32 exit code
+                                       (1618, 3010, 1641, ...)
+
+Lookup order for the meaning/steps: exact hex in Rules.json -> "MSI:n" entry
+-> wrapped 0x8007xxxx form.
+
+Worked examples:
+
+  0x87D00324   = -2016410844 = 2278556452   App installed but detection
+                                             method did not find it
+  -2016345060  = 0x87D1041C                  (same class of ConfigMgr code)
+  0x80244022   = -2145107934                 WU: service reset / update
+                                             download problem
+  0x80070643   = Win32 1603                  MSI fatal error during install
+  1618         = 0x00000652 / MSI:1618       Another installation is already
+                                             in progress
+  0x8018002B   = -2145910741                 MDM: enrollment / policy problem
+  3010         = success (reboot required)   never treated as a failure
+
+Confidence labels in Rules.json: verified (checked against Microsoft docs),
+community (field reports), unverified (best effort). Current file: 76
+verified, 14 community, 1 unverified.
+
+
+--------------------------------------------------------------------------------
+ 8. RULES.JSON - THE SHARED KNOWLEDGE FILE
+--------------------------------------------------------------------------------
+
+Shape:
+
+  {
+    "version": 1,
+    "fixes":  [ ... ],
+    "noise":  [ "regex", ... ],
+    "hidden": [ "regex", ... ]
+  }
+
+A fix entry:
+
+  {
+    "codes":      [ "0x87D00324", "-2016410844", "2278556452" ],
+    "aliasCodes": [ "..." ],              optional, indexed like codes
+    "match":      "(?i)regex on message", optional, fallback when no code hits
+    "title":      "App installed but detection method did not find it",
+    "logs":       [ "AppEnforce.log", "AppDiscovery.log" ],
+    "confidence": "verified",             verified | community | unverified
+    "steps":      [ "Check the exit code and command line in AppEnforce.log...",
+                    "Re-run the Application Deployment Evaluation Cycle..." ]
+  }
+
+  * codes may be hex, signed, unsigned or a small MSI number - all forms are
+    normalised to one index key.
+  * steps are what you see in WHAT TO DO and in the HTML report.
+  * `match` is a .NET regex tested against the raw message; it is how 9 of the
+    current entries work (problems that carry no stable code).
+
+A noise entry is a regex; matching lines are dropped (silently).
+
+A hidden entry is the same idea, but for patterns YOU suppressed from the
+right-click menu. It is stored as a normalised-shape regex, so volatile parts
+stay wild. The status bar counts how many lines your hidden rules removed.
+
+Current contents: 91 fixes, 22 noise patterns, 0 hidden.
+
+Adding your own:
+
+  1. Open rules file (toolbar button) or edit Rules.json directly.
+  2. Copy an existing fix block; change codes/title/logs/steps.
+  3. Save as UTF-8. The next scan picks it up (or click Re-scan).
+  4. If the JSON is invalid you get a clear message box and the tool falls
+     back to an empty ruleset - it will not crash or silently ignore it.
+
+The file is created automatically the first time it is needed and is never
+rewritten by the tool except when you choose "Hide this pattern".
+
+
+--------------------------------------------------------------------------------
+ 9. CLIENT ACTIONS - WHAT EACH ONE DOES
+--------------------------------------------------------------------------------
+
+All of them target the DEVICE box (blank = this machine). Every action returns
+OK or FAIL into the console log; nothing throws out of the UI.
+
+ConfigMgr cycles (Invoke-CimMethod, root\ccm, SMS_Client.TriggerSchedule):
+
+  Machine Policy Retrieval & Evaluation Cycle         {..0021} {..0022}
+  User Policy Retrieval & Evaluation Cycle            {..0025} {..0026}
+  Application Deployment Evaluation Cycle             {..0121}
+  Software Updates Scan Cycle                         {..0113}
+  Software Updates Agent Assignment Evaluation        {..0108}
+  Hardware Inventory Cycle                            {..0001}
+  Software Inventory Cycle                            {..0002}
+  Discovery Data Collection (Heartbeat)               {..0003}
+  Refresh Location Services                           {..0024}
+  Agent Cleanup Request                               {..0040}
+
+  "Run all client cycles" runs all ten in order and logs a start/end banner.
+
+Services:
+  Restart CCM client service (CcmExec)      Restart-Service, local or remote
+  Restart Windows Update service (wuauserv) same
+
+Maintenance:
+  Clear ccmcache          deletes the cached content folders under
+                          Windows\CCM\CcmCache (local) or \\PC\admin$\...
+                          - asks for confirmation first, then reports the
+                          folder count before/after.
+  Trigger Intune / MDM sync   starts the scheduled tasks under
+                          \Microsoft\Windows\EnterpriseMgmt\* (Schedule* and
+                          *enrollment*), locally or via a CIM session.
+                          Fails with a clear message if the device is not
+                          MDM-enrolled.
+
+Note: on a machine with no ConfigMgr client installed, the cycle triggers will
+return FAIL (no root\ccm namespace) - that is the correct, informative answer,
+not a crash.
+
+
+--------------------------------------------------------------------------------
+ 10. EXPORTS AND CLIPBOARD
+--------------------------------------------------------------------------------
+
+Export HTML report (self-contained file, no scripts, opens in any browser):
+  * header with target PC and timestamp
+  * summary cards: items, errors, warnings, with a known fix, logs read
+  * table: Severity | Issue | Fix | Log | Count | First | Last
+  * "Troubleshooting steps" section listing the numbered steps for every
+    issue that has them
+  * footer: "N log entries processed - local only, nothing was uploaded."
+
+Export CSV - columns:
+  Severity,Issue,KnownFix,Log,Count,FirstSeen,LastSeen,ErrorCodes,Steps
+  (steps joined with " | ", codes joined with " ", RFC-4180 quoting).
+
+Clipboard from the detail pane: Copy steps (numbered), Copy as CSV row
+(one row, same columns as the file export).
+
+Both export buttons refuse politely if you have not scanned yet.
+
+
+--------------------------------------------------------------------------------
+ 11. SCANNING ANOTHER MACHINE
+--------------------------------------------------------------------------------
+
+Type a computer name in DEVICE (or pass -ComputerName). It reads:
+
+  \\PC\admin$\Windows\CCM\Logs
+  \\PC\admin$\Windows\ccmsetup\Logs
+  \\PC\C$\ProgramData\Microsoft\IntuneManagementExtension\Logs
+  the MDM event log on that PC (Get-WinEvent -ComputerName)
+
+What you need on the target:
+  * administrative share access (an admin on that PC, or equivalent rights)
+  * the folders to exist (a PC without the ConfigMgr client simply has no
+    CCM\Logs - reported as "not found" in the progress line)
+
+What it does NOT need: an agent, a server, an open firewall port beyond the
+normal admin share, or any change on the endpoint. Client actions on a remote
+PC use the same shares/CIM, so the same rights apply.
+
+If nothing comes back, check: name resolves, you are admin there, and the
+device is actually managed (the About tab lists the exact paths it reads).
+
+
+--------------------------------------------------------------------------------
+ 12. WHAT IT READS ON THIS MACHINE (EXAMPLE)
+--------------------------------------------------------------------------------
+
+Local roots:
+  C:\Windows\CCM\Logs
+  C:\Windows\ccmsetup\Logs
+  C:\ProgramData\Microsoft\IntuneManagementExtension\Logs
+  Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Admin
+
+On a PC without the ConfigMgr client the first two do not exist, so a scan
+reads only the Intune folder (if present) plus the MDM event log, for example:
+
+  1 issues from 1 log files (2 entries read, 0 hidden by your rules).
+
+That is expected - the tool reports what it found rather than inventing data.
+On a properly managed endpoint you get the full set of client logs.
+
+
+--------------------------------------------------------------------------------
+ 13. DEMO DATA (SAMPLE SCCM / INTUNE LOGS)
+--------------------------------------------------------------------------------
+
+Machines without a ConfigMgr client produce almost nothing on the Health tab.
+The toolbar button "Demo data" fixes that for demos, training and screenshots:
+it writes 15 realistic CMTrace log files into .\DemoLogs and scans those
+instead of the machine you are sitting at.
+
+What it generates:
+
+  ConfigMgr / SCCM (10 files)
+    AppEnforce.log              detection failures (0x87D00324), MSI 1603,
+                                MSI 1618, a fallback match on
+                                CAppEnforcer::... failed (0x...)
+    AppDiscovery.log            detection rule evaluation failures
+    PolicyAgent.log             policy download failures (0x87D00440)
+    LocationServices.log        cannot resolve a management point (match)
+    WUAHandler.log              WSUS HTTP 503 (0x80244022), failed search job
+    CAS.log                     content not found, cache/disk space
+    ccmsetup.log                CcmSetup failed (match), MSI 1603
+    UpdatesDeployment.log       no service window for updates
+    ClientIDManagerStartup.log  RegTask registration failure (match)
+    DataTransferService.log     network timeout to the DP
+
+  Intune (5 files)
+    IntuneManagementExtension.log  Win32 app install failed (0x87D13B64),
+                                   404 on remote content, sideloading,
+                                   connection timeout, plus one issue with
+                                   NO known fix (so the grey badge shows)
+    AgentExecutor.log              script timeout (0x87D00207)
+    HealthScripts.log              remediation failed / not applicable
+    AppWorkload.log                Win32 enforcement + detection errors
+    MDM-Diagnostics.log            enrollment sync errors (0x8018002B,
+                                   0x80190190)
+
+What it demonstrates:
+
+  * 28 grouped issues from 72 kept entries - repeats collapse to one row
+    with a count (7x, 5x, 4x ...), GUIDs change on every repeat to prove
+    the normaliser holds the group together.
+  * 27 of them match a fix from Rules.json; one deliberately has none.
+  * Noise patterns are active, so the routine "Waiting for..." / "Got N
+    Win32App(s)" chatter is filtered out even though it is in the files.
+  * Informational lines are present in the files - tick "Include
+    informational lines" and re-scan to see them appear.
+  * Exports, the filter box, the right-click menu and the client actions
+    all work against the demo rows exactly as they do against real data.
+
+Behaviour details:
+
+  * The DEVICE card shows DEMO while demo rows are on screen; the DEVICE
+    box itself is untouched.
+  * Status bar: "Demo data - 28 issues from 15 log files (72 entries read,
+    0 hidden by your rules). Click Scan logs to read this machine instead."
+  * Clicking Scan logs or Re-scan afterwards goes back to real scanning and
+    the card returns to your computer name.
+  * DemoLogs is rewritten on every click (fresh timestamps, last 4 hours)
+    and can be deleted at any time.
+  * The MDM event log is skipped in demo mode, so no real machine data
+    mixes into the sample rows.
+  * Demo rows come from files, so the code path is the real one: same
+    parser, same grouping, same fix matching.
+
+--------------------------------------------------------------------------------
+ 14. LIMITS AND SAFETY
+--------------------------------------------------------------------------------
+
+  * Windows only (WinForms). Tested on Windows PowerShell 5.1.
+  * Reads *.log and *.lo_ at the top level of each root; subfolders are not
+    walked. A .lo_ that is actually a compressed archive is read as text and
+    falls back to the plain-text parser.
+  * Grouping keeps at most 4 sample lines per issue and 20,000 groups per
+    scan; 400,000 entries is the hard read cap.
+  * It never modifies a log file (opens with FileShare.ReadWrite).
+  * It never deletes anything except ccmcache content, and only after you
+    answer Yes to the prompt.
+  * Rules.json is the only file it writes (plus your chosen export files).
+  * No network calls other than the admin shares / CIM / event log of the
+    machine you named.
+
+
+--------------------------------------------------------------------------------
+ 15. TROUBLESHOOTING
+--------------------------------------------------------------------------------
+
+  "Nothing appears after a scan"
+    The tool only keeps warnings and errors unless you tick "Include
+    informational lines". A clean device legitimately shows no rows.
+
+  "Scan failed: ..." in the status bar
+    Usually the remote name or share is unreachable. Try the local scan
+    (blank DEVICE) first to confirm the tool works.
+
+  "Rules.json could not be parsed"
+    Fix the JSON (the message box shows the line). The tool runs with an
+    empty ruleset meanwhile - rescans will still work.
+
+  "no root\ccm namespace" from client actions
+    That PC has no ConfigMgr client; the cycle cannot be triggered there.
+
+  A problem keeps coming back after I hid it
+    Hide from the right-click menu (not by hand) - the generated pattern
+    ignores GUIDs/times/codes, so it keeps matching. Hand-written patterns
+    are easy to over-fit.
+
+  The window looks wrong on a very small display
+    Minimum supported size is 1320 x 760; below that Windows clamps the
+    form and things may clip. Maximize on a 1366x768 or larger screen.
+
+
+--------------------------------------------------------------------------------
+ 16. DEVELOPMENT / VERIFICATION NOTES
+--------------------------------------------------------------------------------
+
+Two headless test suites were used during development (they live outside the
+application folder, in the temp workspace):
+
+  elm-test.ps1    functional tests - rules index, code conversions, parsing
+                  (CMTrace / legacy / multi-line), grouping and normalisation
+                  (braced, parenthesised and bare GUIDs), fixes, exports,
+                  demo log generation and the demo scan: 96 checks.
+  elm-smoke.ps1   builds the real UI in memory (a copy with ShowDialog
+                  stripped), drives a real scan, a demo scan, selection,
+                  filtering, decoder, actions and exports: 57 checks.
+
+Both are re-run after every change to the scripts or Rules.json.
+
+
+--------------------------------------------------------------------------------
+ 17. QUICK REFERENCE
+--------------------------------------------------------------------------------
+
+  Scan                         DEVICE box -> Scan logs (or Re-scan)
+  Nothing to show on this PC   Demo data - 15 sample SCCM / Intune logs,
+                               28 grouped issues, full pipeline
+  See only real problems       leave both checkboxes at their defaults
+  Understand one row           click it - WHAT TO DO + sample lines on the right
+  Suppress a repeating row     right-click -> Hide this pattern for the whole team
+  Decode a code                right-click -> Look up the error code, or the
+                               Error codes tab
+  Fix the device               Client actions tab (target = DEVICE box)
+  Hand the result to a manager Export HTML report
+  Put it in a ticket           Copy as CSV row / Export CSV
+  Add your own knowledge       Open rules file -> add a fix with steps
+
+Nothing leaves your network.
+
+================================================================================

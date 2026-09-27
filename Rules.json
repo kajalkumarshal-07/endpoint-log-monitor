@@ -1,0 +1,1140 @@
+{
+  "version": 1,
+  "_readme": [
+    "Endpoint Log Monitor shared rules file. Edit this file to add your own fixes.",
+    "fixes[].codes   - hex (0x87D00324), signed (-2016410844), unsigned (2278556452) or MSI/Win32 (1618).",
+    "fixes[].match   - case-insensitive regex used when no error code is found.",
+    "fixes[].title   - short issue title shown in the Issues table.",
+    "fixes[].logs    - log files this usually appears in (cosmetic).",
+    "fixes[].steps   - numbered troubleshooting steps.",
+    "fixes[].confidence - verified | community | unverified.",
+    "noise           - regex patterns for lines that are harmless; always hidden.",
+    "hidden          - patterns you added with right-click > Hide for the whole team."
+  ],
+  "fixes": [
+    {
+      "codes": ["0x87D00324", "-2016410844", "2278556452"],
+      "title": "App installed but detection method did not find it",
+      "logs": ["AppEnforce.log", "AppDiscovery.log"],
+      "confidence": "verified",
+      "steps": [
+        "Check the exit code and command line in AppEnforce.log. Confirm the installer actually ran to completion.",
+        "See which detection clause failed in AppDiscovery.log - the rule must be evaluated AFTER the install finishes.",
+        "Check 32-bit vs 64-bit paths and registry redirection (HKLM\\Software vs HKLM\\Software\\Wow6432Node).",
+        "Confirm the exit code is listed in the deployment type Success codes - 3010 and 1641 are successes.",
+        "If the installer runs per-user but ConfigMgr runs it as SYSTEM, the detection hive/path will not match. Align the context.",
+        "Re-run the Application Deployment Evaluation Cycle from the Client Actions tab."
+      ]
+    },
+    {
+      "codes": ["0x87D00325", "-2016410843"],
+      "title": "App still detected after uninstall completed",
+      "logs": ["AppEnforce.log", "AppDiscovery.log"],
+      "confidence": "verified",
+      "steps": [
+        "Read AppEnforce.log and confirm the Uninstall command line actually ran and what it returned.",
+        "Run the uninstall string manually under the same context (SYSTEM vs user) the client used.",
+        "Look for leftover detection artifacts - files, registry values or the MSI product code - and remove them.",
+        "Check whether the uninstall requires a reboot before detection flips to false.",
+        "Re-run the Application Deployment Evaluation Cycle after cleanup."
+      ]
+    },
+    {
+      "codes": ["0x87D00326", "-2016410842"],
+      "title": "Application deployment metadata was not found in WMI",
+      "logs": ["AppDiscovery.log", "CIAgent.log"],
+      "confidence": "verified",
+      "steps": [
+        "Confirm the ConfigMgr client WMI namespace responds: Get-CimInstance -Namespace root\\ccm -ClassName SMS_Client.",
+        "Check for a half-removed client (ccmsetup.exe /uninstall left a partial install).",
+        "Run the Machine Policy Retrieval and Evaluation Cycle to republish deployment metadata.",
+        "If WMI is broken, repair the client from the Client Actions tab."
+      ]
+    },
+    {
+      "codes": ["0x87D00329", "-2016410839"],
+      "title": "Application requirement or detection evaluation failed",
+      "logs": ["AppIntentEval.log", "AppDiscovery.log"],
+      "confidence": "verified",
+      "steps": [
+        "Open AppIntentEval.log and find the requirement rule that returned an error rather than False.",
+        "Test the requirement/detection query by hand (PowerShell Get-CimInstance or reg query) on a healthy device.",
+        "Confirm the WMI class or registry key exists on every OS build you target.",
+        "Fix the rule and redeploy, then force a machine policy refresh."
+      ]
+    },
+    {
+      "codes": ["0x87D00400", "-2016410624"],
+      "title": "Unexpected error evaluating the detection rules",
+      "logs": ["AppDiscovery.log"],
+      "confidence": "verified",
+      "steps": [
+        "Open the deployment type Detection Method and re-validate the rule expression XML.",
+        "Check AppDiscovery.log for the exact clause that failed to evaluate.",
+        "Simplify the rule to a single clause to isolate the bad one.",
+        "Redeploy and force a Machine Policy Retrieval and Evaluation Cycle."
+      ]
+    },
+    {
+      "codes": ["0x87D00401", "-2016410623"],
+      "title": "Incorrect XML expression in the detection rules",
+      "logs": ["AppDiscovery.log"],
+      "confidence": "verified",
+      "steps": [
+        "Open the Detection Method editor - the XML is malformed (unclosed element or bad nesting).",
+        "Rebuild the rule from scratch rather than hand-editing the XML.",
+        "Save, redeploy, then run the Application Deployment Evaluation Cycle."
+      ]
+    },
+    {
+      "codes": ["0x87D00402", "-2016410622"],
+      "title": "Invalid operator in the detection rule",
+      "logs": ["AppDiscovery.log"],
+      "confidence": "verified",
+      "steps": [
+        "Open the Detection Method and check the operator on each clause (Equals, Greater than, Exists ...).",
+        "Numeric operators cannot be used on string values - change the data type or the operator.",
+        "Redeploy and force a client policy refresh."
+      ]
+    },
+    {
+      "codes": ["0x87D00403", "-2016410621"],
+      "title": "Unsupported data type in the detection rule",
+      "logs": ["AppDiscovery.log"],
+      "confidence": "verified",
+      "steps": [
+        "Open the Detection Method and confirm the value type matches the registry value type (REG_DWORD vs REG_SZ).",
+        "A DWORD compared as a string always fails - correct the type.",
+        "Redeploy and re-evaluate the application."
+      ]
+    },
+    {
+      "codes": ["0x87D00420", "-2016410592"],
+      "title": "Detection rules use an unsupported WMI namespace",
+      "logs": ["AppDiscovery.log"],
+      "confidence": "verified",
+      "steps": [
+        "The WMI namespace in the detection rule is not usable by the client (for example a vendor namespace that does not exist on x64).",
+        "Test the query on a healthy client: Get-CimInstance -Namespace <ns> -Query <wql>.",
+        "Switch the detection method to Registry or Script if the namespace cannot be supported.",
+        "Redeploy and force a Machine Policy Retrieval and Evaluation Cycle."
+      ]
+    },
+    {
+      "codes": ["0x87D1041B", "-2016345061"],
+      "title": "Intune Win32 app detection rules not present",
+      "logs": ["AppWorkload.log", "IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "The Win32 app package has no detection rule, or the rule was stripped during repackaging.",
+        "Open the app in Intune admin center > Apps > Windows and confirm a Detection rule is configured.",
+        "Re-upload the .intunewin package with a valid detection rule.",
+        "Force a sync from Settings > Accounts > Access work or school > Info > Sync."
+      ]
+    },
+    {
+      "codes": ["0x87D1041C", "-2016345060"],
+      "title": "Intune Win32 app enforcement error (detection/state)",
+      "logs": ["AppWorkload.log", "IntuneManagementExtension.log"],
+      "confidence": "community",
+      "steps": [
+        "Read AppWorkload.log for the Applicability / Status / ErrorCode triple for the app.",
+        "Verify the detection rule manually under the same user context the install runs in.",
+        "Confirm the installer exit code is in the app's Success codes list.",
+        "Add AV exclusions for %windir%\\IMECache and C:\\Program Files (x86)\\Microsoft Intune Management Extension\\Content.",
+        "Force a device sync and re-check AppWorkload.log."
+      ]
+    },
+    {
+      "codes": ["0x87D00421"],
+      "title": "Win32 app exit code is not mapped in the success list",
+      "logs": ["AppWorkload.log", "IntuneManagementExtension.log"],
+      "confidence": "community",
+      "steps": [
+        "Open the app in Intune > Properties > Requirements and add the installer's exit code to Success codes.",
+        "3010 and 1641 mean success with a reboot - they must be listed or a good install is reported as failed.",
+        "Read the installer's own log to find the real exit code, then re-run the app.",
+        "Force a sync and check AppWorkload.log for the new ErrorCode."
+      ]
+    },
+    {
+      "codes": ["0x87D00422"],
+      "title": "Installer returned an exit code that is not mapped on the Win32 app",
+      "logs": ["AppWorkload.log", "IntuneManagementExtension.log"],
+      "confidence": "community",
+      "steps": [
+        "Read the actual exit code from AppWorkload.log or IntuneManagementExtension.log.",
+        "Add that exit code to the app's Success codes in Intune if the installer really succeeded.",
+        "If it is a real failure, open the vendor installer log (MSI verbose log) and search for 'value 3' to find the failing action.",
+        "Repackage and reassign the app, then force a device sync."
+      ]
+    },
+    {
+      "codes": ["0x87D00207", "-2016410873"],
+      "title": "Script execution timed out",
+      "logs": ["AppEnforce.log", "AgentExecutor.log"],
+      "confidence": "verified",
+      "steps": [
+        "Read AppEnforce.log for the actual elapsed run time of the script or installer.",
+        "Raise the Maximum allowed run time (minutes) on the deployment type / Intune app.",
+        "Make sure the maintenance window or service window is longer than that run time.",
+        "For Intune remediations, shorten the script or split it - the IME hard timeout is short."
+      ]
+    },
+    {
+      "codes": ["0x87D01106", "-2016406778"],
+      "title": "Failed to verify the executable or build the command line",
+      "logs": ["AppEnforce.log", "CAS.log"],
+      "confidence": "verified",
+      "steps": [
+        "Check the Installation command line for broken quoting - an unbalanced quote produces exactly this error.",
+        "Confirm the content actually downloaded: look at CAS.log and ContentTransferManager.log.",
+        "Verify the setup file exists in ccmcache and is not blocked/quarantined by antivirus.",
+        "Redistribute the content and re-run the deployment."
+      ]
+    },
+    {
+      "codes": ["0x87D01107", "-2016406777"],
+      "title": "Failed to access all the provided program locations (retryable)",
+      "logs": ["LocationServices.log", "CAS.log"],
+      "confidence": "verified",
+      "steps": [
+        "Review LocationServices.log for the 'Distribution Point=' entries - the client found DPs but cannot reach them.",
+        "Check boundary groups: the client must be in a group with a reachable DP.",
+        "Test from the client: browse http://<DP>/SMS_DP_<SiteCode>$/ and the SMB content path.",
+        "This code is retryable - only the final state after retries matters.",
+        "If it never resolves, refresh content locations and check the DP's IIS/SMB permissions."
+      ]
+    },
+    {
+      "codes": ["0x87D00607", "-2016410105"],
+      "title": "Content not found",
+      "logs": ["CAS.log", "ContentTransferManager.log", "LocationServices.log", "DataTransferService.log"],
+      "confidence": "verified",
+      "steps": [
+        "Confirm the content exists on a DP: Software Library > Deployment Packages > Content Status. Redistribute if missing.",
+        "Check LocationServices.log for the DP list the client resolved - wrong boundary group, VPN or firewall is the usual cause.",
+        "Check DataTransferService.log for the transfer error (404 vs auth vs timeout) - each needs a different fix.",
+        "Verify the DP IIS/SMB share permissions and that the package ID matches.",
+        "Refresh content locations, then retry the deployment."
+      ]
+    },
+    {
+      "codes": ["0x87D00667", "-2016410009"],
+      "title": "No service window exists to install software updates",
+      "logs": ["UpdatesDeployment.log", "UpdatesHandler.log"],
+      "confidence": "verified",
+      "steps": [
+        "Open UpdatesDeployment.log and find the assignment - confirm the maintenance window on the collection.",
+        "Check the client time zone against the window; an offset window silently never opens.",
+        "Extend the window, or enable immediate installation / 'execute schedules outside service windows' for required updates.",
+        "If no window is configured at all, set one on the target collection.",
+        "Re-evaluate the deployment once the window opens."
+      ]
+    },
+    {
+      "codes": ["0x87D00692", "-2016409964"],
+      "title": "Group Policy conflicts with Configuration Manager / WSUS",
+      "logs": ["WUAHandler.log", "WindowsUpdate.log"],
+      "confidence": "community",
+      "steps": [
+        "Run gpresult /h report.html and look under Windows Components > Windows Update - a GPO is setting WUServer/WUStatusServer.",
+        "ConfigMgr client settings and GPO Windows Update settings fight each other; pick one owner for the workload.",
+        "Check HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate and ...\\AU for UseWUServer and NoAutoUpdate.",
+        "If the device is co-managed, confirm the Windows Update Policies workload is assigned to ConfigMgr or Intune, not both.",
+        "Re-run the Software Updates Scan Cycle from the Client Actions tab after correcting policy."
+      ]
+    },
+    {
+      "codes": ["0x87D00700", "-2016409856"],
+      "title": "Software updates installation not allowed at this time",
+      "logs": ["UpdatesDeployment.log"],
+      "confidence": "verified",
+      "steps": [
+        "A service window, deadline or power setting is blocking installation.",
+        "Check the collection's maintenance window and the deployment deadline in UpdatesDeployment.log.",
+        "Confirm the device is not on battery / asleep if a restart is required.",
+        "Adjust the window or deadline and re-evaluate."
+      ]
+    },
+    {
+      "codes": ["0x87D00604", "-2016410108"],
+      "title": "Software update scan tool not found in the job queue",
+      "logs": ["WUAHandler.log", "UpdatesHandler.log"],
+      "confidence": "verified",
+      "steps": [
+        "The scan job was cancelled or superseded before it completed - usually a restart or a second scan overlapping.",
+        "Trigger the Software Updates Scan Cycle again from the Client Actions tab.",
+        "If it repeats, restart the CCM client service and re-run the scan.",
+        "Check WindowsUpdate.log for the underlying WU agent failure."
+      ]
+    },
+    {
+      "codes": ["0x87D00662", "-2016410014"],
+      "title": "Failed to trigger the installation of software updates",
+      "logs": ["UpdatesDeployment.log", "WUAHandler.log"],
+      "confidence": "verified",
+      "steps": [
+        "Confirm there is an active deployment with a deadline for this device.",
+        "Check for a service window or a pending restart blocking the install.",
+        "Verify the Windows Update Agent is healthy (wuauserv running) and re-run the scan.",
+        "Trigger the Software Updates Agent Assignment Evaluation Cycle."
+      ]
+    },
+    {
+      "codes": ["0x80244022", "-2145107934"],
+      "title": "Windows Update returned HTTP 503 - service unavailable",
+      "logs": ["WUAHandler.log", "WindowsUpdate.log"],
+      "confidence": "verified",
+      "steps": [
+        "WUAHandler only reports what Windows Update returns - open WindowsUpdate.log for the real HTTP call.",
+        "Check the WSUS/SUP IIS 'WsusPool' application pool; a recycled or crashed pool produces 503.",
+        "Increase the WsusPool recycle limits and IIS uploadReadAheadSize / queue length.",
+        "Check free disk space on the WSUS content drive - a full drive is the classic 503 cause.",
+        "Re-run the Software Updates Scan Cycle after the SUP is healthy."
+      ]
+    },
+    {
+      "codes": ["0x8024402C", "-2145107924"],
+      "title": "Windows Update could not resolve the server name (DNS)",
+      "logs": ["WUAHandler.log", "WindowsUpdate.log"],
+      "confidence": "verified",
+      "steps": [
+        "Resolve the WSUS/SUP FQDN from the client: Resolve-DnsName <sup-host>.",
+        "Verify the SUP port (8530/8531) and that the GPO WUServer / WUStatusServer values match the real URL.",
+        "Check the client's DNS suffix search order and proxy exceptions.",
+        "Re-run the scan once name resolution works."
+      ]
+    },
+    {
+      "codes": ["0x8024401C", "-2145107940"],
+      "title": "Windows Update returned HTTP 408 - request timeout",
+      "logs": ["WUAHandler.log", "WindowsUpdate.log"],
+      "confidence": "verified",
+      "steps": [
+        "The SUP/IIS could not answer in time - check the WsusPool application pool and IIS request queue.",
+        "Check WSUS content folder free space and IIS logging volume.",
+        "Look for a proxy or firewall in the path timing out the request.",
+        "Re-run the scan after tuning IIS."
+      ]
+    },
+    {
+      "codes": ["0x80244017", "-2145107943"],
+      "title": "Windows Update returned HTTP 401 - access denied",
+      "logs": ["WUAHandler.log", "WindowsUpdate.log"],
+      "confidence": "verified",
+      "steps": [
+        "Authentication to the SUP failed - check the IIS binding and whether the WSUS pool identity is correct.",
+        "If using a proxy, check the credentials configured for it.",
+        "Verify the client certificate if the site is HTTPS.",
+        "Re-run the scan."
+      ]
+    },
+    {
+      "codes": ["0x80244018", "-2145107942"],
+      "title": "Windows Update returned HTTP 403 - forbidden",
+      "logs": ["WUAHandler.log", "WindowsUpdate.log"],
+      "confidence": "verified",
+      "steps": [
+        "The SUP refused the request - check IIS IP/domain restrictions and the WSUS self-update folder permissions.",
+        "Confirm the SUP is still a valid Software Update Point on the site.",
+        "Check that the WSUS content directory ACLs were not changed.",
+        "Re-run the scan."
+      ]
+    },
+    {
+      "codes": ["0x8024401B", "-2145107941"],
+      "title": "Windows Update returned HTTP 407 - proxy authentication required",
+      "logs": ["WUAHandler.log", "WindowsUpdate.log"],
+      "confidence": "verified",
+      "steps": [
+        "Set the machine WinHTTP proxy correctly: netsh winhttp set proxy proxy-server=\"direct\" or the real proxy.",
+        "Add the WSUS/SUP host to the proxy bypass list.",
+        "Check the ConfigMgr client proxy settings under Client Settings > Network Access.",
+        "Re-run the scan."
+      ]
+    },
+    {
+      "codes": ["0x80248007", "-2145091577"],
+      "title": "Windows Update data store has no data (WU_E_DS_NODATA)",
+      "logs": ["WindowsUpdate.log", "WUAHandler.log"],
+      "confidence": "verified",
+      "steps": [
+        "Update metadata the agent asked for is not in its local database - usually corrupt or never-synchronised metadata.",
+        "Force a SUP synchronisation from the console and confirm the update classification is published.",
+        "Reset the data store: stop wuauserv, BITS and CryptSvc; delete C:\\Windows\\SoftwareDistribution\\DataStore and \\Download; restart; re-scan.",
+        "Run DISM /Online /Cleanup-Image /ScanHealth and sfc /scannow.",
+        "Confirm the Windows Installer service is running."
+      ]
+    },
+    {
+      "codes": ["0x8024001E", "-2145124322"],
+      "title": "Windows Update agent stopped mid-operation (WU_E_SERVICE_STOP)",
+      "logs": ["WindowsUpdate.log"],
+      "confidence": "verified",
+      "steps": [
+        "Read WindowsUpdate.log around the timestamp to see what stopped the agent (shutdown, restart, another installer).",
+        "Check whether a pending reboot or an MSI stopped wuauserv during the scan.",
+        "Confirm no third-party tool is stopping the Windows Update service.",
+        "Re-run the scan; if it stops every time, look at connectivity and policy retry intervals."
+      ]
+    },
+    {
+      "codes": ["0x8024002E", "-2145124306"],
+      "title": "Windows Update disabled by policy - unmanaged server (WU_E_WU_DISABLE)",
+      "logs": ["WUAHandler.log", "WindowsUpdate.log"],
+      "confidence": "verified",
+      "steps": [
+        "Run gpresult /h report.html - a GPO is disabling Windows Update or pointing at an unmanaged server.",
+        "Compare ConfigMgr client settings for Software Updates against GPO settings; they conflict.",
+        "Check HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate and ...\\AU for UseWUServer / NoAutoUpdate.",
+        "If co-managed, make sure the Windows Update Policies workload belongs to exactly one authority.",
+        "Re-run the scan after correcting policy."
+      ]
+    },
+    {
+      "codes": ["0x80072EE2", "-2147012894"],
+      "title": "Network timeout contacting the update/content server (WinHTTP 12002)",
+      "logs": ["WindowsUpdate.log", "WUAHandler.log", "DataTransferService.log"],
+      "confidence": "verified",
+      "steps": [
+        "Check basic connectivity: can the client reach the MP/DP/WSUS host on the required port?",
+        "Look for proxy, VPN or firewall interference - WinHTTP timeouts are almost always in-path.",
+        "Check for MTU/VPN issues on roaming devices.",
+        "Increase timeouts only after connectivity is proven."
+      ]
+    },
+    {
+      "codes": ["0x80072EFF", "-2147012865"],
+      "title": "Secure connection to the server failed (WinHTTP 12007)",
+      "logs": ["WindowsUpdate.log", "DataTransferService.log", "ccmsetup.log"],
+      "confidence": "community",
+      "steps": [
+        "Verify the server name resolves and the TLS handshake succeeds (test with Invoke-WebRequest from the client).",
+        "Confirm the client trusts the server certificate chain (root CA in Trusted Root).",
+        "Check system time/clock skew - it breaks TLS.",
+        "Confirm the certificate has not expired and the IIS binding is correct."
+      ]
+    },
+    {
+      "codes": ["0x80072F8F"],
+      "title": "TLS/certificate trust failure getting DP or update locations",
+      "logs": ["ccmsetup.log", "LocationServices.log", "DataTransferService.log"],
+      "confidence": "community",
+      "steps": [
+        "Classic HTTPS trust failure: 'GetDPLocations failed with error 0x80072f8f' after a WinHTTP request fails.",
+        "Confirm the client trusts the DP/MP certificate - the issuing root CA must be in the client's Trusted Root store.",
+        "Compare CCMHTTPSTATE / CCMHTTPSSTATE echoed in ccmsetup.log against the actual site communication mode.",
+        "Check system time for clock skew and confirm the server certificate is not expired."
+      ]
+    },
+    {
+      "codes": ["0x80070643", "-2147023293"],
+      "aliasCodes": ["1603"],
+      "title": "Fatal Windows Installer error (MSI 1603)",
+      "logs": ["ccmsetup.log", "client.msi.log", "AppEnforce.log"],
+      "confidence": "verified",
+      "steps": [
+        "Open the MSI log (client.msi.log or the app's own verbose log) and search for 'value 3' - that names the failing custom action.",
+        "ccmsetup.log 'InstallFromManifest failed 0x80070643' and AppEnforce.log 'ExitCode: 1603' are the same failure in two encodings.",
+        "Common root causes: pending reboot, another install in progress (MSI 1618), insufficient rights, corrupt WMI.",
+        "Check msiexec.exe is not already running.",
+        "Capture a verbose MSI log by re-running the installer manually with /l*v install.log."
+      ]
+    },
+    {
+      "codes": ["0x80070002", "-2147024894", "2"],
+      "title": "The system cannot find the file specified (Win32 2)",
+      "logs": ["ccmsetup.log", "CAS.log", "AppEnforce.log"],
+      "confidence": "verified",
+      "steps": [
+        "In ccmsetup.log this usually means MobileClientUnicode.tcf or the install source is missing - a partial/aborted install.",
+        "Check C:\\Windows\\ccmsetup\\ for a stale or partial folder.",
+        "Verify the source package (/source: or the MP) is reachable and the content finished downloading.",
+        "Confirm antivirus/FSRm is not quarantining the file.",
+        "In AppEnforce.log, confirm the install command points at a file that exists in ccmcache."
+      ]
+    },
+    {
+      "codes": ["0x80070005", "-2147024891", "5"],
+      "title": "Access denied (Win32 5)",
+      "logs": ["ccmsetup.log", "AppEnforce.log", "DataTransferService.log"],
+      "confidence": "verified",
+      "steps": [
+        "Confirm the client is running the install as SYSTEM (ConfigMgr default) and that the target path/registry hive is writable.",
+        "Check folder and registry ACLs on the install destination.",
+        "Look for antivirus or AppLocker/WDAC blocking the writer.",
+        "For content download, check the DP share and NTFS permissions."
+      ]
+    },
+    {
+      "codes": ["0x8004100E", "-2147217394"],
+      "title": "WMI invalid namespace (WBEM_E_INVALID_NAMESPACE)",
+      "logs": ["ccmsetup.log", "LocationServices.log", "CCMExec.log"],
+      "confidence": "verified",
+      "steps": [
+        "Test the namespace: Get-CimInstance -Namespace root\\ccm -ClassName SMS_Client. If this fails the client WMI is broken.",
+        "Check WMI repository integrity: winmgmt /verifyrepository.",
+        "Repair first, do not delete: winmgmt /resyncrepository, then re-register the CCM provider.",
+        "If unrecoverable: ccmsetup.exe /uninstall, remove C:\\Windows\\CCM, repair WMI, reinstall the client."
+      ]
+    },
+    {
+      "codes": ["0x80041010", "-2147217392"],
+      "title": "WMI invalid class (WBEM_E_INVALID_CLASS)",
+      "logs": ["ccmsetup.log", "CCMExec.log"],
+      "confidence": "verified",
+      "steps": [
+        "The class is not registered - typical of a half-installed or partially removed client.",
+        "Verify with: Get-CimClass -Namespace root\\ccm -ClassName SMS_Client.",
+        "Run winmgmt /verifyrepository and winmgmt /resyncrepository.",
+        "Reinstall the client: ccmsetup.exe /uninstall then a clean install."
+      ]
+    },
+    {
+      "codes": ["0x80041003", "-2147217405"],
+      "title": "WMI access denied (WBEM_E_ACCESS_DENIED)",
+      "logs": ["CCMExec.log", "ClientIDManagerStartup.log"],
+      "confidence": "verified",
+      "steps": [
+        "Confirm the account running the query has local administrator rights.",
+        "Check DCOM launch/access permissions if you are querying the device remotely.",
+        "Verify the WMI repository ACLs were not modified by a hardening policy.",
+        "Retry locally to isolate whether it is a remote-only permission problem."
+      ]
+    },
+    {
+      "codes": ["0x80041002", "-2147217406"],
+      "title": "WMI object not found (WBEM_E_NOT_FOUND)",
+      "logs": ["ClientIDManagerStartup.log", "LocationServices.log"],
+      "confidence": "verified",
+      "steps": [
+        "Usually a missing client object or a certificate request that has not been created yet.",
+        "In ClientIDManagerStartup.log check the 'RegTask:' lines for the step that failed.",
+        "Force registration: run ccmsetup.exe /register, restart CcmExec, then run Machine Policy Retrieval and Evaluation.",
+        "If it persists, check client certificate state in certlm.msc."
+      ]
+    },
+    {
+      "codes": ["0x80041006", "-2147217402"],
+      "title": "WMI out of memory (WBEM_E_OUT_OF_MEMORY)",
+      "logs": ["CCMExec.log", "ccmsetup.log"],
+      "confidence": "verified",
+      "steps": [
+        "Check available memory and the number of concurrent WMI queries.",
+        "Restart the Windows Management Instrumentation service (Winmgmt).",
+        "Look for a WMI provider leak from a third-party agent.",
+        "Repair the repository if the condition persists."
+      ]
+    },
+    {
+      "codes": ["0x80004005", "-2147467259"],
+      "title": "Unspecified failure (E_FAIL)",
+      "logs": ["LocationServices.log", "ccmsetup.log", "CIAgent.log"],
+      "confidence": "verified",
+      "steps": [
+        "E_FAIL is a placeholder, never a diagnosis - read the line immediately before it for the component-specific error.",
+        "In LocationServices.log check whether the client resolved an MP at all.",
+        "In ccmsetup.log find the preceding 'CcmSetup failed with error code' line.",
+        "Fix the underlying cause, then trigger the relevant client cycle again."
+      ]
+    },
+    {
+      "codes": ["0x8000FFFF", "-2147418113"],
+      "title": "Unexpected error (E_UNEXPECTED)",
+      "logs": ["PolicyAgent.log", "CIAgent.log", "LocationServices.log"],
+      "confidence": "verified",
+      "steps": [
+        "E_UNEXPECTED is a catch-all - always read the surrounding lines for the real component error.",
+        "Check whether the expected policy documents exist (0x87D00440 is the specific code for missing policy).",
+        "Trigger a Machine Policy Retrieval and Evaluation Cycle after fixing the cause.",
+        "If policy download is failing, verify MP connectivity and the client certificates."
+      ]
+    },
+    {
+      "codes": ["0x87D00440", "-2016410560"],
+      "title": "Expected policy documents are incomplete or missing",
+      "logs": ["PolicyAgent.log", "CIAgent.log"],
+      "confidence": "verified",
+      "steps": [
+        "The client could not download a complete policy assignment set from the MP.",
+        "Check PolicyAgent.log for the download error and confirm the MP is reachable.",
+        "Trigger Machine Policy Assignments Request, then Machine Policy Evaluation.",
+        "Check for a site signing certificate problem or an MP returning HTTP errors."
+      ]
+    },
+    {
+      "codes": ["0x87D00441", "-2016410559"],
+      "title": "Deployment metadata not available on the client",
+      "logs": ["CIAgent.log", "PolicyAgent.log"],
+      "confidence": "verified",
+      "steps": [
+        "The deployment was referenced by policy but its metadata never arrived.",
+        "Trigger Machine Policy Retrieval and Evaluation to republish assignments.",
+        "Confirm the deployment is still targeted at this collection and not expired.",
+        "Check PolicyAgent.log for download failures."
+      ]
+    },
+    {
+      "codes": ["0x87D01201", "-2016406527"],
+      "title": "Not enough disk space to download content (cache/disk full)",
+      "logs": ["CAS.log", "ContentTransferManager.log"],
+      "confidence": "verified",
+      "steps": [
+        "Check free space on the drive holding ccmcache.",
+        "Increase the client cache size: Client Settings > Cache Settings, or clear old content from ccmcache.",
+        "ContentTransferManager.log shows requested vs available size.",
+        "Trim the content package if it contains unnecessary files.",
+        "Retry the deployment."
+      ]
+    },
+    {
+      "codes": ["0x87D01202", "-2016406526"],
+      "title": "Client cache is smaller than the requested content",
+      "logs": ["CAS.log", "ContentTransferManager.log"],
+      "confidence": "verified",
+      "steps": [
+        "Raise the cache size in Client Settings > Cache Settings (default is only 100 MB).",
+        "Or run Clear Content on the deployment and free space in ccmcache.",
+        "Confirm the content package is not bloated.",
+        "Retry after the cache is large enough."
+      ]
+    },
+    {
+      "codes": ["0x87D00800", "-2016409600"],
+      "title": "Content transfer manager job is in an unexpected state",
+      "logs": ["ContentTransferManager.log", "LocationServices.log"],
+      "confidence": "verified",
+      "steps": [
+        "Find the job ID in ContentTransferManager.log and note the state transition that failed.",
+        "Restart the BITS service - CTM is BITS-backed.",
+        "Clear ccmcache (or use Clear Content on the deployment) and retry.",
+        "Check LocationServices.log for a stale or unreachable DP.",
+        "As a last resort reset the BITS/CTM job store and force a policy + deployment re-evaluation."
+      ]
+    },
+    {
+      "codes": ["0x87D0080C", "-2016409588"],
+      "title": "No WDS session is available for multicast",
+      "logs": ["ContentTransferManager.log", "SMS_DM.log"],
+      "confidence": "verified",
+      "steps": [
+        "Multicast requires the Windows Deployment Services role on the DP.",
+        "Confirm WDS is installed, started and at the same version as ConfigMgr; restart the WDSServer service.",
+        "If you do not use multicast, disable it on the package - most teams do not need it.",
+        "Redistribute the content after changing multicast settings."
+      ]
+    },
+    {
+      "codes": ["0x87D0080B", "-2016409589"],
+      "title": "Multicast (MCS) encountered a WDS error",
+      "logs": ["ContentTransferManager.log"],
+      "confidence": "verified",
+      "steps": [
+        "Check the WDS server role and the WDSServer service state on the DP.",
+        "Verify the DP and WDS versions match the site version.",
+        "Review the WDS remote installation log on the DP.",
+        "Disable multicast on the package if the feature is unused."
+      ]
+    },
+    {
+      "codes": ["0x87D13B64", "-2016330908"],
+      "title": "Intune app install has failed",
+      "logs": ["AppWorkload.log", "IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "Read AppWorkload.log for the Applicability / Status / ErrorCode triple.",
+        "Open the installer's own log - for MSI, search for 'value 3'.",
+        "Confirm the exit code is in the app's Success codes.",
+        "Add AV exclusions for %windir%\\IMECache and the Intune Management Extension content folder.",
+        "Force a device sync and re-check."
+      ]
+    },
+    {
+      "codes": ["0x87D13B61", "-2016330911"],
+      "title": "User installed the app before the managed install could take place",
+      "logs": ["AppWorkload.log"],
+      "confidence": "verified",
+      "steps": [
+        "Uninstall the manually installed copy from the device.",
+        "On the next sync Intune will install the managed version.",
+        "Use a detection rule and requirement that detect the unmanaged copy so remediation is automatic."
+      ]
+    },
+    {
+      "codes": ["0x87D13B62", "-2016330910"],
+      "title": "User rejected the offer to install the app",
+      "logs": ["AppWorkload.log"],
+      "confidence": "verified",
+      "steps": [
+        "This is a user decision on an Available assignment - no fix needed.",
+        "If the app must be present, change the assignment to Required.",
+        "For Required apps, re-evaluate: the IME will retry automatically."
+      ]
+    },
+    {
+      "codes": ["0x87D13B63", "-2016330909"],
+      "title": "User rejected the offer to update the app",
+      "logs": ["AppWorkload.log"],
+      "confidence": "verified",
+      "steps": [
+        "Expected behaviour for an Available update assignment.",
+        "Switch to a Required assignment if the update must be enforced.",
+        "Re-sync to re-offer."
+      ]
+    },
+    {
+      "codes": ["0x87D13B66", "-2016330906"],
+      "title": "Managed app was removed by the user",
+      "logs": ["AppWorkload.log"],
+      "confidence": "verified",
+      "steps": [
+        "For Available apps this is expected - nothing to fix.",
+        "For Required apps the IME will re-install; confirm the assignment is Required.",
+        "Check ClientHealth.log if re-installation never happens."
+      ]
+    },
+    {
+      "codes": ["0x87D13B67", "-2016330905"],
+      "title": "Intune app state is unknown",
+      "logs": ["AppWorkload.log"],
+      "confidence": "verified",
+      "steps": [
+        "Force a sync from Settings > Accounts > Access work or school > Info > Sync.",
+        "Check IME service health in ClientHealth.log.",
+        "Re-run the detection rule manually under the correct user context.",
+        "Restart the Intune Management Extension service."
+      ]
+    },
+    {
+      "codes": ["0x87D13B6F", "-2016330897"],
+      "title": "Connection to Intune timed out",
+      "logs": ["AppWorkload.log", "IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "Verify the device can reach the Intune service endpoints and is not blocked by a proxy.",
+        "Check for TLS inspection breaking the connection.",
+        "Confirm the device has working internet connectivity.",
+        "Force a sync and retry."
+      ]
+    },
+    {
+      "codes": ["0x87D13B8F", "-2016330865"],
+      "title": "App is installed on the device but is unmanaged",
+      "logs": ["AppWorkload.log"],
+      "confidence": "verified",
+      "steps": [
+        "Uninstall the pre-existing copy from the device.",
+        "On the next sync the device installs the app from Intune.",
+        "Add a detection rule that identifies the unmanaged version so this is handled automatically."
+      ]
+    },
+    {
+      "codes": ["0x87D104B3", "-2016344909"],
+      "title": "Remote content was not found at the server (404)",
+      "logs": ["IntuneManagementExtension.log", "AppWorkload.log"],
+      "confidence": "verified",
+      "steps": [
+        "The content link expired or the package was deleted/re-uploaded.",
+        "Re-upload the .intunewin package or re-create the app.",
+        "Force a device sync so the IME gets a fresh content URI.",
+        "Check that the delivery optimization / BITS cache is not serving a stale entry."
+      ]
+    },
+    {
+      "codes": ["0x87D104B4", "-2016344908"],
+      "title": "Remote server required authentication and refused the credentials",
+      "logs": ["IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "Confirm the device is signed in with a work/school account and has a valid token.",
+        "Check whether a proxy is intercepting the request.",
+        "Sign out and back in to the work account, then re-sync."
+      ]
+    },
+    {
+      "codes": ["0x87D104B1", "-2016344911"],
+      "title": "Access to remote content denied",
+      "logs": ["IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "Check the app's assignment and that the device/user is in the target group.",
+        "Verify conditional access or an app protection policy is not blocking the download.",
+        "Re-sync and retry."
+      ]
+    },
+    {
+      "codes": ["0x87D103EC", "-2016345108"],
+      "title": "Connection to the remote server timed out",
+      "logs": ["IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "Check internet connectivity and proxy/VPN configuration on the device.",
+        "Test reachability of the Intune content endpoints from the device.",
+        "Retry the sync after connectivity is confirmed."
+      ]
+    },
+    {
+      "codes": ["0x87D103E9", "-2016345111"],
+      "title": "Remote server refused the connection",
+      "logs": ["IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "A network device or proxy is resetting the connection.",
+        "Check firewall rules and TLS inspection exclusions for Intune endpoints.",
+        "Confirm the device's system clock is correct."
+      ]
+    },
+    {
+      "codes": ["0x87D105EA", "-2016344598"],
+      "title": "Not enough disk space for the content",
+      "logs": ["IntuneManagementExtension.log", "AppWorkload.log"],
+      "confidence": "verified",
+      "steps": [
+        "Free disk space on the system drive.",
+        "Clear %windir%\\IMECache and stale content in the Intune Management Extension content folder.",
+        "Retry the app installation."
+      ]
+    },
+    {
+      "codes": ["0x87D105E0", "-2016344608"],
+      "title": "Intune returned 404 - object not found",
+      "logs": ["IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "The app, policy or assignment referenced no longer exists in the tenant.",
+        "Confirm the app still exists and is assigned.",
+        "Re-sync the device to pick up the current object set."
+      ]
+    },
+    {
+      "codes": ["0x87D1FDE8", "-2016281112"],
+      "title": "Remediation failed (for example BitLocker recovery password rotation)",
+      "logs": ["HealthScripts.log", "IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "Open HealthScripts.log to see which remediation script failed and its output.",
+        "Confirm the script runs under the expected context and has the rights it needs.",
+        "For BitLocker: check TPM availability (Get-TPM), that WinRE is enabled (reagentc /info), and Secure Boot.",
+        "Check for a GPO that conflicts with the Intune BitLocker policy.",
+        "Force a device sync after fixing."
+      ]
+    },
+    {
+      "codes": ["0x87D1FDE9", "-2016281111"],
+      "title": "Remediation not applicable for this device",
+      "logs": ["HealthScripts.log"],
+      "confidence": "verified",
+      "steps": [
+        "The detection script returned 0, so no remediation ran - this is normally correct.",
+        "If you expected it to run, check the detection script logic and the scope tags/assignment group."
+      ]
+    },
+    {
+      "codes": ["0x80073CFF", "-2147009281"],
+      "title": "Sideloading is not enabled on this system",
+      "logs": ["IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "Enable app sideloading: Settings > Privacy & security > For developers, or via policy.",
+        "Group Policy: Computer Configuration > Administrative Templates > Windows Components > App Package Deployment > Allow all trusted apps to install.",
+        "Re-run the installation after the policy applies."
+      ]
+    },
+    {
+      "codes": ["0x80190190", "-2145844848"],
+      "title": "MDM sync failed with Invalid Request (HTTP 400)",
+      "logs": ["DeviceManagement-Enterprise-Diagnostics-Provider/Admin", "IntuneManagementExtension.log"],
+      "confidence": "community",
+      "steps": [
+        "Often stale enrollment state, for example a device previously enrolled as Hybrid Azure AD joined that was re-enrolled.",
+        "Scheduled Tasks > Microsoft > Windows > EnterpriseMgmt - find the enrollment ID folder and delete stale entries, then re-enroll.",
+        "Verify the UPN under the enrollment registry key and that the device object exists in Entra ID.",
+        "Check the MDM device certificate expiry in certlm.msc.",
+        "Force a sync after cleanup."
+      ]
+    },
+    {
+      "codes": ["0x8018002B"],
+      "title": "Intune enrollment/sync error (not officially documented)",
+      "logs": ["DeviceManagement-Enterprise-Diagnostics-Provider/Admin"],
+      "confidence": "unverified",
+      "steps": [
+        "Microsoft does not publish a definition for this code; community reports associate it with auto-enrollment failures.",
+        "Check that the device is licensed for Intune and that the MDM enrollment scope includes it.",
+        "Confirm the user's UPN and that auto-enrollment GPO/Intune settings are correct.",
+        "Review the DeviceManagement-Enterprise-Diagnostics-Provider event log for the surrounding entries."
+      ]
+    },
+    {
+      "codes": ["1618", "0x80070652"],
+      "title": "Another installation is already in progress (MSI 1618)",
+      "logs": ["AppEnforce.log", "client.msi.log", "AgentExecutor.log"],
+      "confidence": "verified",
+      "steps": [
+        "msiexec is single-instance per machine - a concurrent install is blocking this one.",
+        "Check whether msiexec.exe is running and what it is installing.",
+        "Sequence the apps or add a retry with backoff in the deployment.",
+        "Re-run the Application Deployment Evaluation Cycle once the other install finishes."
+      ]
+    },
+    {
+      "codes": ["1601", "0x80070641"],
+      "title": "Windows Installer service could not be accessed (MSI 1601)",
+      "logs": ["AppEnforce.log", "ccmsetup.log"],
+      "confidence": "verified",
+      "steps": [
+        "Confirm the Windows Installer service (msiserver) is set to Manual and running.",
+        "Check whether a policy disables the installer service.",
+        "Restart msiserver and retry."
+      ]
+    },
+    {
+      "codes": ["1602", "0x80070642"],
+      "title": "User cancelled the installation (MSI 1602)",
+      "logs": ["AppEnforce.log"],
+      "confidence": "verified",
+      "steps": [
+        "An interactive prompt appeared and was dismissed - make the install silent.",
+        "Repackage with fully silent switches (for example /qn or /quiet).",
+        "If it must be interactive, deploy as Available rather than Required."
+      ]
+    },
+    {
+      "codes": ["1619", "0x80070653"],
+      "title": "Installation package could not be opened (MSI 1619)",
+      "logs": ["AppEnforce.log", "CAS.log"],
+      "confidence": "verified",
+      "steps": [
+        "The MSI did not arrive intact - this is a content problem, not an install problem.",
+        "Check CAS.log and ContentTransferManager.log for the download result.",
+        "Confirm antivirus is not quarantining the file in ccmcache.",
+        "Redistribute the content and clear the local cache."
+      ]
+    },
+    {
+      "codes": ["1620", "0x80070654"],
+      "title": "Installation package is not valid (MSI 1620)",
+      "logs": ["AppEnforce.log"],
+      "confidence": "verified",
+      "steps": [
+        "The file at the install path is not a valid MSI - wrong file, truncated download or renamed package.",
+        "Verify the file hash against the source.",
+        "Redistribute content and clear ccmcache before retrying."
+      ]
+    },
+    {
+      "codes": ["1633", "0x80070661"],
+      "title": "Platform not supported by this MSI (MSI 1633)",
+      "logs": ["AppEnforce.log"],
+      "confidence": "verified",
+      "steps": [
+        "The package's Template Summary property does not support this architecture.",
+        "Check whether you are deploying an x86-only package to x64 devices.",
+        "Repackage with the correct platform or add a second deployment type with an architecture requirement."
+      ]
+    },
+    {
+      "codes": ["1638", "0x80070666"],
+      "title": "Another version of this product is already installed (MSI 1638)",
+      "logs": ["AppEnforce.log"],
+      "confidence": "verified",
+      "steps": [
+        "The device has a different major version installed than the package you deployed.",
+        "Either allow upgrade by adding an upgrade code relationship, or uninstall the old version first.",
+        "Add 1638 to Success codes only if that really means success in your case."
+      ]
+    },
+    {
+      "codes": ["1639", "0x80070667"],
+      "title": "Invalid command-line argument (MSI 1639)",
+      "logs": ["AppEnforce.log"],
+      "confidence": "verified",
+      "steps": [
+        "Check the Installation program string - a typo or bad switch produces this.",
+        "Test the exact command line manually from an elevated prompt.",
+        "Quote paths that contain spaces."
+      ]
+    },
+    {
+      "codes": ["3010", "0x80070BC2"],
+      "title": "Success, reboot required (MSI 3010)",
+      "logs": ["AppEnforce.log", "IntuneManagementExtension.log"],
+      "confidence": "verified",
+      "steps": [
+        "This is a SUCCESS code - if it is not in Success codes, ConfigMgr/Intune reports a good install as failed.",
+        "Add 3010 to the deployment type / Intune app Success codes.",
+        "Schedule or allow a restart, then re-run detection - this is the classic cause of 0x87D00324 after a reboot-pending install."
+      ]
+    },
+    {
+      "codes": ["1641", "0x80070669"],
+      "title": "Success, installer initiated a restart (MSI 1641)",
+      "logs": ["AppEnforce.log"],
+      "confidence": "verified",
+      "steps": [
+        "This is a SUCCESS code - add 1641 to Success codes.",
+        "Confirm the reboot is acceptable in the maintenance window.",
+        "Detection must run again after the restart."
+      ]
+    },
+    {
+      "codes": ["0x87D01251", "-2016406447"],
+      "title": "Application deployment type handler could not be initialised",
+      "logs": ["AppEnforce.log", "AppDiscovery.log"],
+      "confidence": "community",
+      "steps": [
+        "The deployment type is not supported on this system (OS, architecture or installer type mismatch).",
+        "Check the deployment type's requirements and run this log on a device that matches your target.",
+        "Confirm the client is the current version - update the client if it is old.",
+        "Add a fallback deployment type for unsupported platforms."
+      ]
+    },
+    {
+      "codes": [],
+      "match": "(?i)group\\s*policy[^.]{0,80}(conflict|conflicting)",
+      "title": "Group Policy conflicts with Configuration Manager",
+      "logs": ["WUAHandler.log"],
+      "confidence": "community",
+      "steps": [
+        "Run gpresult /h report.html and look under Windows Components > Windows Update.",
+        "ConfigMgr client settings and GPO Windows Update settings fight each other - pick one owner.",
+        "Check HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate for UseWUServer.",
+        "If co-managed, confirm the Windows Update Policies workload belongs to exactly one authority.",
+        "Re-run the Software Updates Scan Cycle after correcting policy."
+      ]
+    },
+    {
+      "codes": [],
+      "match": "(?i)exit\\s*code[^.]{0,120}(isn't mapped|is not mapped|not mapped|not in the (list of )?success)",
+      "title": "Installer returned an exit code that is not mapped on the Win32 app",
+      "logs": ["AppWorkload.log", "IntuneManagementExtension.log"],
+      "confidence": "community",
+      "steps": [
+        "Read the actual exit code from the log.",
+        "Add it to the app's Success codes if the installer really succeeded (3010 and 1641 almost always should be there).",
+        "If it is a real failure, open the installer's own log and search for 'value 3' to find the failing action.",
+        "Repackage and reassign, then force a device sync."
+      ]
+    },
+    {
+      "codes": [],
+      "match": "(?i)app retry held by the .*GRS|24-hour GRS window|cooldown period",
+      "title": "App retry held by the GRS (grace period) window",
+      "logs": ["AppWorkload.log", "AppEnforce.log"],
+      "confidence": "community",
+      "steps": [
+        "The client will not retry an enforcement for up to 24 hours after a failure - this is by design.",
+        "If you need it sooner, trigger the Application Deployment Evaluation Cycle from the Client Actions tab.",
+        "For Intune, force a device sync to re-evaluate.",
+        "Fix the underlying install error first or it will simply fail again."
+      ]
+    },
+    {
+      "codes": [],
+      "match": "(?i)(failed to resolve|unable to (get|retrieve).*(management point|MP)).{0,80}(WINS|DNS|SLP)",
+      "title": "Client cannot locate a management point (name resolution)",
+      "logs": ["LocationServices.log", "ClientLocation.log"],
+      "confidence": "community",
+      "steps": [
+        "The client is falling back through AD > DNS > WINS > SLP and failing name resolution at each step.",
+        "Test resolution from the device: Resolve-DnsName <MP-FQDN>.",
+        "Confirm boundary groups so the client has a valid MP and DP.",
+        "Check ClientLocation.log first to see which site the client is assigned to.",
+        "Fix DNS/WINS, then trigger Location Services refresh."
+      ]
+    },
+    {
+      "codes": [],
+      "match": "(?i)scan failed with error|failed to end search job",
+      "title": "Software update scan failed",
+      "logs": ["WUAHandler.log"],
+      "confidence": "verified",
+      "steps": [
+        "WUAHandler only reports what Windows Update returns - open WindowsUpdate.log for the real cause.",
+        "Decode the error on the Error codes tab (0x80244022 = HTTP 503, 0x8024402C = DNS, 0x8024401C = HTTP 408).",
+        "Check the SUP/WSUS health: IIS WsusPool application pool, disk space, self-update.",
+        "Re-run the Software Updates Scan Cycle from the Client Actions tab."
+      ]
+    },
+    {
+      "codes": [],
+      "match": "(?i)CcmSetup failed with error code",
+      "title": "Client installation (ccmsetup) failed",
+      "logs": ["ccmsetup.log"],
+      "confidence": "verified",
+      "steps": [
+        "The last line of ccmsetup.log names the error code - decode it on the Error codes tab.",
+        "Check the Fallback Status Point STATEID echoed in the log to see which phase failed.",
+        "0x8007xxxx codes are Win32 errors - subtract 0x80070000 and run net helpmsg <n>.",
+        "Check the MP responds: http://<mp>/sms_mp/.sms_aut",
+        "For a clean retry: ccmsetup.exe /uninstall, delete C:\\Windows\\ccmsetup, then reinstall."
+      ]
+    },
+    {
+      "codes": [],
+      "match": "(?i)RegTask: Failed",
+      "title": "Client registration with the site failed",
+      "logs": ["ClientIDManagerStartup.log", "ccmsetup.log"],
+      "confidence": "community",
+      "steps": [
+        "The 'RegTask:' lines state exactly which registration step failed.",
+        "Registration cannot complete if the client cannot find an MP - fix boundary groups and DNS first.",
+        "Check for clock skew causing expired messages, and that CcmExec is running.",
+        "Check the client certificate in certlm.msc if the site is HTTPS.",
+        "Force it: ccmsetup.exe /register, restart CcmExec, then Machine Policy Retrieval and Evaluation."
+      ]
+    },
+    {
+      "codes": [],
+      "match": "(?i)(Method|CAppEnforcer::)\\w+ failed \\(0x87[0-9A-Fa-f]+\\)",
+      "title": "Application enforcement failed",
+      "logs": ["AppEnforce.log"],
+      "confidence": "verified",
+      "steps": [
+        "Read the full AppEnforce.log entry - the parenthesised code names the specific failure.",
+        "Decode the code on the Error codes tab and follow its fix.",
+        "Confirm the install command line, exit code and detection method all agree.",
+        "Re-run the Application Deployment Evaluation Cycle from the Client Actions tab."
+      ]
+    },
+    {
+      "codes": [],
+      "match": "(?i)failed to (download|refresh).*(policy|policystore)",
+      "title": "Policy download or refresh failed",
+      "logs": ["PolicyAgent.log", "LocationServices.log"],
+      "confidence": "community",
+      "steps": [
+        "Check PolicyAgent.log for the HTTP status from the MP.",
+        "Verify the MP role is healthy and the client can reach it on the right port.",
+        "Check client certificates if the site uses HTTPS.",
+        "Trigger Machine Policy Assignments Request from the Client Actions tab."
+      ]
+    }
+  ],
+  "noise": [
+    "(?i)^Waiting for (2 mins|30 secs) for (Group Policy|policy) to",
+    "(?i)^Async searching (of updates using WUAgent started|completed)",
+    "(?i)^Its a WSUS Update Source type",
+    "(?i)^Enabling WUA Managed server policy",
+    "(?i)^Added Update Source",
+    "(?i)^Search Criteria is",
+    "(?i)^Scan results will include all superseded updates",
+    "(?i)^Got \\d+ Win32App\\(s\\)",
+    "(?i)^Get policies = \\[\\]",
+    "(?i)EspPhase: NotInEsp",
+    "(?i)^Requesting available apps only",
+    "(?i)Applicability: .*Status: Installed, ErrorCode: null",
+    "(?i)hr = 0x0\\b",
+    "(?i)error code 0x0 \\(0\\)",
+    "(?i)^Beginning (detection|evaluation)",
+    "(?i)^Detect (setup has )?started",
+    "(?i)^Prepared command line:",
+    "(?i)^Looking for exit code \\d+ in exit codes table",
+    "(?i)^Process \\d+ terminated with exitcode: 0\\b",
+    "(?i)\\+\\+\\+ Discovered application",
+    "(?i)^Waiting for .* a mandatory retry",
+    "(?i)^Retry delay .* not exceeded"
+  ],
+  "hidden": []
+}
